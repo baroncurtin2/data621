@@ -1,0 +1,124 @@
+---
+title: "Data 621 - Week1"
+author: "Baron Curtin"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(tidy = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+
+libs <- c("tidyverse", "magrittr", "knitr", "kableExtra", "fBasics", "reshape2")
+
+loadPkg <- function(x) {
+  if(!require(x, character.only = T)) install.packages(x, dependencies = T)
+  require(x, character.only = T)
+}
+
+lapply(libs, loadPkg)
+```
+
+## Load Data
+```{r data, message = FALSE}
+training <- read_csv("https://raw.githubusercontent.com/baroncurtin2/data621/master/week1/moneyball-training-data.csv",
+                     col_names = T,
+                     col_types = NULL,
+                     na = c("", "NA"))
+testdata <- read_csv("https://raw.githubusercontent.com/baroncurtin2/data621/master/week1/moneyball-evaluation-data.csv",
+                     col_names = T,
+                     col_types = NULL,
+                     na = c("", "NA"))
+```
+
+## Data Exploration
+```{r}
+glimpse(training)
+```
+Using glimpse, we can see that there are `r nrow(training)` observations and `r ncol(training)` variables in our training dataset. Of the `r ncol(training)` variables, it seems INDEX provides no additional value other than being a sorting/labelling mechanism for each observation. INDEX will be removed in the *Data Preparation* section.
+
+### Non-Visual Inspection
+
+#### Variables Breakdown
+  + Response Variable: TARGET_WINS
+  + Explanatory Variables:
+```{r, echo=FALSE}
+data_frame(variables = names(training)) %>%
+  mutate(variables = str_replace(variables, "^([[:alnum:]]+?_{1})([[:alnum:]]+?)(_{1}[[:alnum:]]+?)$", "\\2")) %>%
+  group_by(variables) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+```
+    - 7 Batting variables
+    - 4 Pitching variables
+    - 2 Baserunning variables
+    - 2 Fielding variables
+
+### Basic Stats
+```{r basicstats, echo=FALSE}
+trainingStats <- basicStats(training)[c("nobs", "NAs", "Minimum", "Maximum", "1. Quartile", "3. Quartile", "Mean", "Median", "Variance", "Stdev", "Skewness", "Kurtosis"),] %>%
+  as.tibble() %>%
+  rownames_to_column() %>%
+  gather(var, value, -rowname) %>%
+  spread(rowname, value) %>%
+  rename_all(str_to_lower) %>%
+  rename_all(str_trim) %>%
+  rename(variables = "var",
+         "q1" = `1. quartile`,
+         "q3" = `3. quartile`,
+         "max"= maximum,
+         "min" = minimum,
+         "na_vals" = nas, 
+         "n" = nobs,
+         "sd" = stdev,
+         "var" = variance) %>%
+  mutate(obs = n - na_vals,
+         range = max - min,
+         iqr = q3 - q1) %>%
+  select(variables, n, na_vals, obs, mean, min, q1, median, q3, max, sd, var, range, iqr, skewness, kurtosis) %>%
+  as.tibble()
+
+trainingStats
+```
+#### Missing Values
+```{r, echo=FALSE}
+trainingStats %>%
+  dplyr::filter(na_vals > 0) %>%
+  select(variables, na_vals, obs)
+```
+The 6 fields shown in the table above having missing values.
+
+#### Skew
+```{r, echo=FALSE}
+trainingStats %>%
+  mutate(mean = mean(skewness)) %>%
+  dplyr::filter(skewness > mean(skewness)) %>%
+  select(variables, skewness, mean)
+```
+The 4 fields shown in the table above have higher than average skew values, which provides evidence of outliers greatly effecting the mean of those fields
+
+### Visual Inspection
+```{r, echo=FALSE}
+vis <- melt(training) %>%
+  dplyr::filter(variable != "INDEX") %>%
+  dplyr::rename_all(str_replace(variable, "TEAM_", ""))
+
+ggplot(vis, aes(value)) +
+  geom_density(fill = "blue") +
+  facet_wrap(~ variable, scales = "free")
+```
+
+
+## Data Preparation
+
+
+## Build Models
+
+
+## Select Models
+
