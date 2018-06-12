@@ -4,17 +4,18 @@ author: "Baron Curtin"
 date: "`r Sys.Date()`"
 output:
   prettydoc::html_pretty:
+    toc: true
     theme: cayman
     highlight: github
     df_print: paged
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE)
 knitr::opts_chunk$set(tidy = TRUE)
 knitr::opts_chunk$set(warning = FALSE)
 
-libs <- c("tidyverse", "magrittr", "knitr", "kableExtra", "fBasics", "reshape2")
+libs <- c("tidyverse", "magrittr", "knitr", "kableExtra", "fBasics", "reshape2", "missForest")
 
 loadPkg <- function(x) {
   if(!require(x, character.only = T)) install.packages(x, dependencies = T)
@@ -24,9 +25,10 @@ loadPkg <- function(x) {
 lapply(libs, loadPkg)
 ```
 
-## Load Data
+
 ```{r data, message = FALSE}
-training <- read_csv("https://raw.githubusercontent.com/baroncurtin2/data621/master/week1/moneyball-training-data.csv",
+# load data
+trainingdata <- read_csv("https://raw.githubusercontent.com/baroncurtin2/data621/master/week1/moneyball-training-data.csv",
                      col_names = T,
                      col_types = NULL,
                      na = c("", "NA"))
@@ -38,9 +40,9 @@ testdata <- read_csv("https://raw.githubusercontent.com/baroncurtin2/data621/mas
 
 ## Data Exploration
 ```{r}
-glimpse(training)
+glimpse(trainingdata)
 ```
-Using glimpse, we can see that there are `r nrow(training)` observations and `r ncol(training)` variables in our training dataset. Of the `r ncol(training)` variables, it seems INDEX provides no additional value other than being a sorting/labelling mechanism for each observation. INDEX will be removed in the *Data Preparation* section.
+Using glimpse, we can see that there are `r nrow(trainingdata)` observations and `r ncol(trainingdata)` variables in our training dataset. Of the `r ncol(trainingdata)` variables, it seems INDEX provides no additional value other than being a sorting/labelling mechanism for each observation. INDEX will be removed in the *Data Preparation* section.
 
 ### Non-Visual Inspection
 
@@ -48,7 +50,7 @@ Using glimpse, we can see that there are `r nrow(training)` observations and `r 
   + Response Variable: TARGET_WINS
   + Explanatory Variables:
 ```{r, echo=FALSE}
-data_frame(variables = names(training)) %>%
+data_frame(variables = names(trainingdata)) %>%
   mutate(variables = str_replace(variables, "^([[:alnum:]]+?_{1})([[:alnum:]]+?)(_{1}[[:alnum:]]+?)$", "\\2")) %>%
   group_by(variables) %>%
   summarise(count = n()) %>%
@@ -59,9 +61,9 @@ data_frame(variables = names(training)) %>%
     - 2 Baserunning variables
     - 2 Fielding variables
 
-### Basic Stats
+#### Basic Stats
 ```{r basicstats, echo=FALSE}
-trainingStats <- basicStats(training)[c("nobs", "NAs", "Minimum", "Maximum", "1. Quartile", "3. Quartile", "Mean", "Median", "Variance", "Stdev", "Skewness", "Kurtosis"),] %>%
+trainingStats <- basicStats(trainingdata)[c("nobs", "NAs", "Minimum", "Maximum", "1. Quartile", "3. Quartile", "Mean", "Median", "Variance", "Stdev", "Skewness", "Kurtosis"),] %>%
   as.tibble() %>%
   rownames_to_column() %>%
   gather(var, value, -rowname) %>%
@@ -102,23 +104,209 @@ trainingStats %>%
 ```
 The 4 fields shown in the table above have higher than average skew values, which provides evidence of outliers greatly effecting the mean of those fields
 
+#### Correlation
+```{r}
+trainingdata %>%
+  mutate(TEAM_BATTING_1B = TEAM_BATTING_H - TEAM_BATTING_2B - TEAM_BATTING_3B - TEAM_BATTING_HR) %>%
+  cor(use = "na.or.complete") %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "predictor") %>%
+  as_data_frame() %>%
+  select(predictor, TARGET_WINS) %>%
+  dplyr::filter(!predictor %in% c("INDEX", "TARGET_WINS")) %>%
+  arrange(desc(TARGET_WINS))
+```
+  * The correlations tell us that HITS have the highest impact on winning games
+  * There is some collinearity between some of the variables, especially the hitting variables
+
 ### Visual Inspection
+
+#### Density Plots
 ```{r, echo=FALSE}
-vis <- melt(training) %>%
+# data frame for visuals
+vis <- melt(trainingdata) %>%
   dplyr::filter(variable != "INDEX") %>%
-  dplyr::rename_all(str_replace(variable, "TEAM_", ""))
+  mutate(variable = str_replace(variable, "TEAM_", ""))
 
 ggplot(vis, aes(value)) +
-  geom_density(fill = "blue") +
+  geom_density(fill = "skyblue") +
   facet_wrap(~ variable, scales = "free")
 ```
 
+#### Box Plots
+
+Box plots can provide a visual representation of the variance of the data
+```{r, echo=FALSE}
+ggplot(vis, aes(x = variable, y = value)) +
+  geom_boxplot(show.legend = T) +
+  stat_summary(fun.y = mean, color = "red", geom = "point", shape = 18, size = 3) +
+  coord_flip() +
+  ylim(0, 2200)
+```
+  * The box plots reveal that a great majority of the explanatory variables have high variances
+  * Some of the variables contain extreme outliers that this graph does not show because i had to reduce the limits on the graph to get clear box plots
+  * Many of the medians and means are also not aligned which demonstrates the outliers' effects 
+
+#### Histograms
+```{r, echo=FALSE}
+ggplot(vis, aes(value)) +
+  geom_histogram()  +
+  facet_wrap(~ variable, scales = "free")
+```
+  * The histograms reveal that very few of the variables are normally distributed
+  * A few variables are multi-model
+  * Some of the variable exhibit a lot of skew (e.g. BASERUN_SB)
 
 ## Data Preparation
 
+### New Variable for Singles
+```{r, echo=FALSE}
+remove_string <- function(x, remove) {
+  str_replace(x, remove, "")
+}
+
+training <- trainingdata %>%
+  # singles
+  mutate(TEAM_BATTING_1B = TEAM_BATTING_H - TEAM_BATTING_2B - TEAM_BATTING_3B - TEAM_BATTING_HR) %>%
+  # remove 'TEAM_'
+  rename_all(remove_string, remove = "TEAM_")
+```
+
+#### Variable Removal
+```{r}
+training %<>%
+  # remove fields with large amount of NAs
+  select(-c("BATTING_HBP", "BASERUN_CS")) %>%
+  # remove all hits to reduce collinearity
+  select(-BATTING_H) %>%
+  # remove INDEX
+  select(-INDEX)
+```
+  * Our dataset will be augmented by removing the fields with a large amount of NA values
+  * BATTING_H will be removed to reduce collinearity and replaced by BATTING_1B which is a calculated variable based on BATTING_H, BATTING_2B, BATTING_3B, BATTING_HR
+  * INDEX is removed because it has no meaning in the dataset
+
+#### Missing Values Handling
+missForest will be used to handle all missing data by using a random forest algorithm to replace the missing values with "forest" values
+```{r, echo=FALSE}
+training.forest <- training %>%
+  as.data.frame() %>%
+  missForest()
+
+training.imp <- training.forest$ximp
+```
+
+```{r, echo=FALSE}
+# imputed values
+summary(training.imp)
+
+# imputation error
+training.forest$OOBerror
+```
+  * Through the summary() function, we can see that none of the fields have missing values any longer
 
 ## Build Models
 
+### Model 1: All Variables
+```{r, echo=FALSE}
+m1 <- lm(TARGET_WINS ~ ., data = training.imp)
+summary(m1)
+```
+  * Model 1 has 9/13 statistically significant variables at the 5% significance level
+  * Interestingly, FIELDING_DP has a negative impact on wins. This may be because it would mean the opposing team is getting hits
+  * The rest of the variables align as one would expect to win contribution
+    + BATTING_SO, PITCHING_BB, FIELDING_E have negative impacts on TARGET_WINS as expected
+    + PITCHING_HR suprisingly has a positive impact on TARGET_WINS. It is possible there is a confounding variable affecting this coefficient
+    + BATTING_HR has the highest impact on wins as one would expect
+  * This model also shows that giving up home-runs is not as big a detriment as one may think
+  * An R^2 of .3512 indicates that there may be room to improve the model
+
+### Model 2: Only Significant Variables
+```{r, echo=FALSE}
+m2 <- lm(TARGET_WINS ~ . - BATTING_BB - PITCHING_H - PITCHING_HR - PITCHING_BB - PITCHING_SO, data = training.imp)
+summary(m2)
+```
+  * Model 2 removes the non-significant variables
+  * The R^2 is lower than Model 1 at .3459 however this may be acceptable due to removing the confounding variables
+  * FIELDING_DP still has a negative impact on wins
+  * The rest of the variables align as one would expect to win contribution
+    + BATTING_SO, FIELDING_E have negative impacts on TARGET_WINS as expected
+    + BATTING_HR has the highest impact on wins as one would expect
+  
+### Model 3: Highly Correlated Variables
+```{r}
+trainingdata %>%
+  mutate(TEAM_BATTING_1B = TEAM_BATTING_H - TEAM_BATTING_2B - TEAM_BATTING_3B - TEAM_BATTING_HR) %>%
+  cor(use = "na.or.complete") %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "predictor") %>%
+  as_data_frame() %>%
+  select(predictor, TARGET_WINS) %>%
+  dplyr::filter(!predictor %in% c("INDEX", "TARGET_WINS")) %>%
+  dplyr::filter(TARGET_WINS > mean(TARGET_WINS)) %>%
+  arrange(desc(TARGET_WINS)) 
+
+m3 <- lm(TARGET_WINS ~ PITCHING_H + BATTING_BB + PITCHING_BB + PITCHING_HR + BATTING_HR + BATTING_2B + BATTING_1B, data = training.imp)
+summary(m3)
+```
+  * Of the three models, Model 3 has the lowest R^2 at .232
+  * Model 3 also reintroduces variables that are not statistically significant
+  * BATTING_3B is not introduced into this model as it did have a negative correlation
+  * PITCHING_H is the only variable that has a negative impact on TARGET_WINS
+  * The rest of the variables align as one would expect to win contribution
+    + BATTING_HR has the highest impact on wins as one would expect
+    + BATTING_1B has the second highest impact on wins, a lot more than BATTING_2B which is unexpected
+    + PITCHING_HR has a very small positive impact on wins. This is counterintuitive as giving up runs should increase the chance of losing (decrease the chance of winning)
+
 
 ## Select Models
+Based on the R^2 and the removal of statistically insignificant variables, Model 2 is the ideal model to use. Model 3's R^2 was simply far too low and reintroduced statistically insignificant variables. Model 1 provides a great benchmark for R^2 that Model 2 comes close to achieving
+
+### Evaluation
+```{r}
+par(mfrow=c(2,2))
+plot(m2)
+```
+ * The QQ plot shows slight deviation from normal towards the extremities however this can be excused due to the sheer amount of observations
+ * The residual plot indicates that there is no constant variance
+ * It is likely that further transformations could be made to the data to better meet regression appropriateness requirements
+ 
+### Test Model
+```{r}
+summary(testdata)
+```
+  * INDEX can be removed from the data
+  * The NA values will be handled with missForest similar to our training set
+  * BATTING_1B will be added and BATTING_H removed
+  * TEAM_BATTING_HBP, TEAM_BASERUN_CS will be removed
+
+#### Transform Test Data
+```{r}
+testdata %<>%
+  # drop useless variables
+  select(-c("INDEX", "TEAM_BATTING_HBP", "TEAM_BASERUN_CS")) %>%
+  # add BATTING_1B
+  mutate(TEAM_BATTING_1B = TEAM_BATTING_H - TEAM_BATTING_2B - TEAM_BATTING_3B - TEAM_BATTING_HR) %>%
+  # remove 'TEAM_'
+  rename_all(remove_string, remove = "TEAM_")
+```
+
+```{r}
+test.forest <- testdata %>%
+  as.data.frame() %>%
+  missForest()
+
+test.imp <- test.forest$ximp
+```
+#### Predict
+```{r}
+test_results <- predict(m2, newdata = test.imp)
+
+bind_cols(data.frame(TARGET_WINS = test_results), test.imp)
+```
+
+## Code Appendix
+
+```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE}
+```
 
