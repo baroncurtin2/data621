@@ -38,11 +38,14 @@ testdata <- read_csv("https://raw.githubusercontent.com/baroncurtin2/data621/mas
                      na = c("", "NA"))
 ```
 
+## Introduction
+The purpose of this assignment is to develop a linear model that can "reliably" predict a team's number of wins (TARGET_WINS), based on a number of variables ranging from BATTING, BASERUN(ning), FIELDING, and PITCHING. Some of the variables have a positive impact on TARGET_WINS, while others have a negative impact
+
 ## Data Exploration
 ```{r}
 glimpse(trainingdata)
 ```
-Using glimpse, we can see that there are `r nrow(trainingdata)` observations and `r ncol(trainingdata)` variables in our training dataset. Of the `r ncol(trainingdata)` variables, it seems INDEX provides no additional value other than being a sorting/labelling mechanism for each observation. INDEX will be removed in the *Data Preparation* section.
+Using glimpse, we can see that there are `r nrow(trainingdata)` observations and `r ncol(trainingdata)` variables in our training dataset. Of the `r ncol(trainingdata)` variables, it seems INDEX provides no additional value other than being a sorting/labelling mechanism for each observation. INDEX will be removed in the *Data Preparation* section. Another thing of note is that there is no variable for singles. The variable TEAM_BATTING_1B will also be created in the *Data Preparation* section
 
 ### Non-Visual Inspection
 
@@ -87,11 +90,17 @@ trainingStats <- basicStats(trainingdata)[c("nobs", "NAs", "Minimum", "Maximum",
 
 trainingStats
 ```
+  * basicStats is able to show that TEAM_BATTING_HBP has the most egregious amount of missing values
+  * There is very strong skew in the TEAM_PITCHING_SO variable
+  * TEAM_PITCHING_H has the highest variance amongst the variables
+
+
 #### Missing Values
 ```{r, echo=FALSE}
 trainingStats %>%
   dplyr::filter(na_vals > 0) %>%
-  select(variables, na_vals, obs)
+  select(variables, na_vals, obs) %>%
+  arrange(desc(na_vals))
 ```
 The 6 fields shown in the table above having missing values.
 
@@ -117,7 +126,9 @@ trainingdata %>%
   arrange(desc(TARGET_WINS))
 ```
   * The correlations tell us that HITS have the highest impact on winning games
-  * There is some collinearity between some of the variables, especially the hitting variables
+  * There is some collinearity between some of the variables, especially the BATTING variables
+  * FIELDING_E has the greatest impact on losing games
+  * TEAM_BATTING_3B has an anomolous negative correlation on TARGET_WINS
 
 ### Visual Inspection
 
@@ -132,6 +143,7 @@ ggplot(vis, aes(value)) +
   geom_density(fill = "skyblue") +
   facet_wrap(~ variable, scales = "free")
 ```
+  * The density plots show various issues with skew an non-normality
 
 #### Box Plots
 
@@ -154,7 +166,7 @@ ggplot(vis, aes(value)) +
   facet_wrap(~ variable, scales = "free")
 ```
   * The histograms reveal that very few of the variables are normally distributed
-  * A few variables are multi-model
+  * A few variables are multi-modal
   * Some of the variable exhibit a lot of skew (e.g. BASERUN_SB)
 
 ## Data Preparation
@@ -171,6 +183,7 @@ training <- trainingdata %>%
   # remove 'TEAM_'
   rename_all(remove_string, remove = "TEAM_")
 ```
+  * The variable TEAM_BATTING_1B was created and added to the dataset
 
 #### Variable Removal
 ```{r}
@@ -182,7 +195,7 @@ training %<>%
   # remove INDEX
   select(-INDEX)
 ```
-  * Our dataset will be augmented by removing the fields with a large amount of NA values
+  * Our dataset will be augmented by removing the fields with a large amount of NA values (BATTING_HBP, BASERUN_CS)
   * BATTING_H will be removed to reduce collinearity and replaced by BATTING_1B which is a calculated variable based on BATTING_H, BATTING_2B, BATTING_3B, BATTING_HR
   * INDEX is removed because it has no meaning in the dataset
 
@@ -258,18 +271,62 @@ summary(m3)
     + BATTING_1B has the second highest impact on wins, a lot more than BATTING_2B which is unexpected
     + PITCHING_HR has a very small positive impact on wins. This is counterintuitive as giving up runs should increase the chance of losing (decrease the chance of winning)
 
+### Model 4: Log Transformation of All Variables
+```{r}
+remove_negInf <- function(x) {
+  if_else(x < 0, 0, x)
+}
+
+log.training.imp <- training.imp %>%
+  # log transform
+  mutate_all(funs(log(.))) %>%
+  # replace -Inf with 0
+  mutate_all(funs(remove_negInf(.)))
+
+m4 <- lm(TARGET_WINS ~ ., data = log.training.imp)
+summary(m4)
+```
+  * Model 4 has the highest R^2 at .4385
+  * Negative impact on wins
+    + BATTING_BB, BATTING_SO, PITCHING_H, FIELDING_E, FIELDING_DP
+    + The anomolies are BATTING_BB and FIELDING_DP which one would expect a positive coefficient
+  * Positive impact on wins
+    + BATTING_1B has the highest impact on TARGET_WINS
+    + PITCHING_BB has an anomolously high impact on TARGET_WINS. Giving up bases should have a negative impact on wins. It is impossible this is done to hitters that are particularly dangerous when being pitched straight up to
+  * The homerun variables are not statistically significant
+
+### Model 5: Square Root Transform
+```{r}
+sq.training.imp <- training.imp %>%
+  # sqrt transform
+  mutate_all(funs(sqrt(.)))
+
+m5 <- lm(TARGET_WINS ~ ., data = sq.training.imp)
+summary(m5)
+```
+  * Model 5 has an R^2 at .387
+  * Negative impact on wins
+    + BATTING_BB, BATTING_SO, PITCHING_H, FIELDING_E, FIELDING_DP
+    + The anomolies are BATTING_BB and FIELDING_DP which one would expect a positive coefficient
+  * Positive impact on wins
+    + BATTING_1B has the highest impact on TARGET_WINS
+  * PITCHING_HR, PITCHING_BB, and BATTING_BB are not statistically significant
 
 ## Select Models
-Based on the R^2 and the removal of statistically insignificant variables, Model 2 is the ideal model to use. Model 3's R^2 was simply far too low and reintroduced statistically insignificant variables. Model 1 provides a great benchmark for R^2 that Model 2 comes close to achieving
+Based on the R^2, Model 4 is the ideal model to use and the best predictor for TARGET_WINS. Its R^2 was .4385. Model 3's R^2 was simply far too low and reintroduced statistically insignificant variables. Model 1 provides a great benchmark for R^2 that Model 2 comes close to achieving. Model 5 was only able to achieve a .387 R^2.
 
 ### Evaluation
 ```{r}
 par(mfrow=c(2,2))
-plot(m2)
+
+plot(m4)
+hist(m4$residuals)
+qqnorm(m4$residuals)
+qqline(m4$residuals)
 ```
  * The QQ plot shows slight deviation from normal towards the extremities however this can be excused due to the sheer amount of observations
  * The residual plot indicates that there is no constant variance
- * It is likely that further transformations could be made to the data to better meet regression appropriateness requirements
+ * The histogram shows a normal distribution amongst the residuals
  
 ### Test Model
 ```{r}
@@ -300,7 +357,7 @@ test.imp <- test.forest$ximp
 ```
 #### Predict
 ```{r}
-test_results <- predict(m2, newdata = test.imp)
+test_results <- predict(m4, newdata = test.imp)
 
 bind_cols(data.frame(TARGET_WINS = test_results), test.imp)
 ```
