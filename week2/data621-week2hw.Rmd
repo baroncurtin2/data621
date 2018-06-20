@@ -198,26 +198,27 @@ rocCurve <- function(df, int = 100) {
   
   # generate sensitivty
   sens <- thresholds %>%
-    map_dbl(function(x) sensitivity(df = data, opt = "prob", threshold = x))
+    map_dbl(function(x) sensitivity(df = data, opt = "prob", threshold = x)) %>%
+    sort()
   
   # generate specificity
   spec <- thresholds %>%
-    map_dbl(function(x) (1 - specificity(df = data, opt = "prob", threshold = x)))
+    map_dbl(function(x) (1 - specificity(df = data, opt = "prob", threshold = x))) %>%
+    sort()
   
   # generate plot
   plotdf <- data_frame(x = spec, y = sens)
   g <- ggplot(plotdf, aes(x = x, y = y)) +
+    geom_line() +
     geom_abline(intercept = 0, slope = 1) +
-    geom_smooth() +
+    #geom_smooth() +
     labs(x = "Specificity", y = "Sensitivity", title = "Custom ROC Curve")
   
   # calculate area under curve
   auc <- sum(diff(spec) * rollmean(sens, 2))
   
   # return list of items
-  return(list(spec = spec,
-              sens = sens,
-              plot = g,
+  return(list(plot = g,
               AUC = auc))
 }
 
@@ -238,7 +239,7 @@ metric <- c("accuracy", "cer", "precision", "sensitivity", "specificity", "f1sco
 ## Question 12
 ![](./pics/12.png)
 ```{r}
-cMatrix <- confusionMatrix(as.factor(data$scored.class), as.factor(data$class), positive = "1") %>%
+cMatrix <- confusionMatrix(as.factor(data$scored.class), as.factor(data$class), positive = "1", mode = "everything") %>%
   print
 ```
 
@@ -247,10 +248,10 @@ cMatrix <- confusionMatrix(as.factor(data$scored.class), as.factor(data$class), 
 metric %>%
   bind_cols(., caret = c(cMatrix$overall[[1]],
                  1 - cMatrix$overall[[1]],
-                 cMatrix$byClass[c(3, 1, 2, 7)])) %>%
+                 cMatrix$byClass[c(5, 1, 2, 7)])) %>%
   mutate(match = round(value, 8) == round(caret, 8))
 ```
-
+  * The custom functions match caret up to 8 digits
 
 ## Question 13
 ![](./pics/13.png)
