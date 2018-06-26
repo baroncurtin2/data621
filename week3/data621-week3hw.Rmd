@@ -1,0 +1,125 @@
+---
+title: "Data 621 - Week3"
+author: "Baron Curtin"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    df_print: paged
+    highlight: github
+    theme: cayman
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(tidy = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+
+libs <- c("knitr", "magrittr", "data.table", "kableExtra", "caret", "pROC", "zoo", "ISLR", "leaps", "fBasics", "reshape2", "tidyverse")
+
+loadPkg <- function(x) {
+  if(!require(x, character.only = T)) install.packages(x, dependencies = T)
+  require(x, character.only = T)
+}
+
+lapply(libs, loadPkg)
+```
+
+
+```{r data, message=FALSE}
+crimeTraining <- fread("https://raw.githubusercontent.com/baroncurtin2/data621/master/week3/crime-training-data.csv") %>%
+  as.tibble()
+crimeTest <- fread("https://raw.githubusercontent.com/baroncurtin2/data621/master/week3/crime-evaluation-data.csv") %>%
+  as.tibble()
+```
+
+
+## Introduction
+The purpose of this assignment is to develop a binary logistic model that can "reliably" predict whether a neighborhood is at risk for high crime levels
+
+
+## Data Exploration
+![](./pics/1.png)
+
+### Non-Visual Inspection
+
+#### Variables
+![](./pics/vars.png)
+  * Response Variable: target
+  * Explanatory Variables:
+```{r}
+data_frame(explanatory_variables = names(crimeTraining)) %>%
+  filter(explanatory_variables != "target") %>%
+  arrange(explanatory_variables)
+```
+
+
+```{r}
+glimpse(crimeTraining)
+```
+The glipmse function of dplyr shows us that there are `r nrow(crimeTraining)` observations and `r ncol(crimeTraining)` variables
+  * 10 variables of type dble
+  * 4 variables of type int
+
+```{r}
+summary(crimeTraining)
+```
+  * Summary is able to show that none of the variables have missing values
+  * The mean of target is below .5 which means there are more observations where the crime rate is below the median
+
+#### Basic Stats
+```{r}
+crimeStats <- basicStats(crimeTraining)[c("nobs", "NAs", "Minimum", "Maximum", "1. Quartile", "3. Quartile", "Mean", "Median", "Variance", "Stdev", "Skewness", "Kurtosis"),] %>%
+  as_tibble() %>%
+  rownames_to_column() %>%
+  gather(var, value, -rowname) %>%
+  spread(rowname, value) %>%
+  rename_all(str_to_lower) %>%
+  rename_all(str_trim) %>%
+  rename(variables = "var",
+         "q1" = `1. quartile`,
+         "q3" = `3. quartile`,
+         "max"= maximum,
+         "min" = minimum,
+         "na_vals" = nas, 
+         "n" = nobs,
+         "sd" = stdev,
+         "var" = variance) %>%
+  mutate(obs = n - na_vals,
+         range = max - min,
+         iqr = q3 - q1) %>%
+  select(variables, n, na_vals, obs, mean, min, q1, median, q3, max, sd, var, range, iqr, skewness, kurtosis) %>%
+  as_tibble()
+
+crimeStats
+```
+  * basicStats is further able to confirm no missing values
+  * The variable black has the highest variance
+  * The largest skew value is ~3.3 with the chas variable
+    + This variable is just a dummy variable for whether the subrub borders the Charles River
+
+### Visual Inspection
+
+#### Pairs
+```{r}
+pairs(crimeTraining, data = crimeTraining, col = crimeTraining$target)
+```
+
+
+
+## Data Preparation
+![](./pics/2.png)
+
+
+## Build Models
+![](./pics/3.png)
+
+
+## Select Models
+![](./pics/4.png)
+
+
+## Code Appendix
+
+```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE}
+```
