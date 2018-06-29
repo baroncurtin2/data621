@@ -379,11 +379,11 @@ plot(curveRoc, legacy.axes = T, main = "pROC")
   * The model used had a ~90% accuracy  
   * The CER is ~10%  
   * Precision was ~95%  
-  * Negative prediction rate was only ~87% significant down from the positive prediction rate of ~95%  
-    + The model struggled more with predicting negatives  
-  * The sensitivity is ~.85  
-  * The specificity is ~.95  
-  * The F1 is ~.89  
+  * Negative prediction rate was only ~89%. The positive prediction rate of ~91%  
+    + The model struggled slightly more with predicting negatives  
+  * The sensitivity is ~.89  
+  * The specificity is ~.92  
+  * The F1 is ~.90  
   * The AUC is `r curveRoc$auc`
   
 
