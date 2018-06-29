@@ -362,7 +362,7 @@ trainingMinus <- crimeTraining %>%
 test_results <- predict(m2, newdata = trainingMinus, type = "response")
 
 df <- bind_cols(crimeTraining, data.frame(scored_target = test_results)) %>%
-  mutate(scored_target = if_else(scored_target > .5, 1, 0)) %>%
+  mutate(scored_target = if_else(scored_target > mean(crimeTraining$target), 1, 0)) %>%
   print
 ```
 
@@ -391,7 +391,7 @@ plot(curveRoc, legacy.axes = T, main = "pROC")
 ```{r}
 test_results <- predict(m2, newdata = crimeTest, type = "response")
 bind_cols(crimeTest, data.frame(scored_target = test_results)) %>%
-  mutate(scored_target = if_else(scored_target > .5, 1, 0)) %>%
+  mutate(scored_target = if_else(scored_target > mean(crimeTraining$target), 1, 0)) %>%
   print
 ```
 
