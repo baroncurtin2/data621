@@ -29,7 +29,7 @@ loadPkg <- function(x) {
   require(x, character.only = T)
 }
 
-libs <- c("knitr", "magrittr", "data.table", "kableExtra", "caret", "pROC", "missForest", "zoo", "ISLR", "leaps", "fBasics", "reshape2", "tidyverse", "GGally", "gridExtra", "ROCR")
+libs <- c("knitr", "magrittr", "data.table", "kableExtra", "caret", "pROC", "missForest", "zoo", "ISLR", "leaps", "fBasics", "reshape2", "tidyverse", "GGally", "gridExtra", "ROCR", "dummies", "pscl")
 
 lapply(libs, loadPkg)
 ```
@@ -240,7 +240,11 @@ vis %>%
 ### Transforming Monetary Columns to Numeric
 
 ```{r}
-datasets <- list(train = insTraining, test = insTest)
+set.seed(777)
+smp_size <- floor(.7 * nrow(insTraining))
+train_ind <- sample(seq_len(nrow(insTraining)), size = smp_size)
+
+datasets <- list(train = insTraining[train_ind, ], test = insTest, test2 = insTraining[-train_ind, ])
 
 # helper function for converting text to number
 convertText2Num <- function(x) {
@@ -297,32 +301,75 @@ datasets %<>%
   })
 ```
 
-#### Transform All Character Fields to Factors
+#### Create Binary Dummy Variable Columns for Categorical Variables
+
+First we will take CAR_USE, PARENT1, MSTATUS, SEX, RED_CAR, REVOKED, URBANCITY and convert them to binary variables
 ```{r}
 datasets %<>%
   map(function(df) {
-    # get chracter columns
-    z <- df %>%
-      select_if(is.character) %>%
-      mutate_all(as.factor) %>%
-      mutate_all(as.numeric)
-    
-    # rename columns
-    names(z) <- names(z) %>%
-      map(~ str_c(.x, "_f", collapse = ""))
-    
-    # bind cols
     df %<>%
-      bind_cols(z)
+      # PARENT1 rename to SINGLEPARENT / conversion
+      rename(SINGLEPARENT = PARENT1) %>%
+      mutate(SINGLEPARENT = if_else(SINGLEPARENT == "Yes", 1, 0)) %>%
+      # MSTATUS rename to MARRIED / conversion
+      rename(MARRIED = MSTATUS) %>%
+      mutate(MARRIED = if_else(MARRIED == "Yes", 1, 0)) %>%
+      # SEX rename to MALE / conversion
+      rename(MALE = SEX) %>%
+      mutate(MALE = if_else(MALE == "M", 1, 0)) %>%
+      # CAR_USE rename to COMMERCIALUSE / conversion
+      rename(COMMERCIALUSE = CAR_USE) %>%
+      mutate(COMMERCIALUSE = if_else(COMMERCIALUSE == "Commercial", 1, 0)) %>%
+      # RED_CAR conversion
+      mutate(RED_CAR = if_else(RED_CAR == "Yes", 1, 0)) %>%
+      # REVOKED conversion
+      mutate(REVOKED = if_else(REVOKED == "Yes", 1, 0)) %>%
+      # URBANICITY
+      mutate(URBANICITY = if_else(str_detect(URBANICITY, "Urban"), 1, 0))
+  })
+```
+
+  * SINGLEPARENT will have value of 1 when TRUE, else 0
+  * MARRIED will have value of 1 when TRUE, else 0
+  * RED_CAR will have value of 1 when TRUE, else 0
+  * MALE will have value of 1 when TRUE, else 0
+  * COMMERCIALUSE will have value of 1 when TRUE, else 0
+  * REVOKED will have value of 1 when TRUE, else 0
+  * URBANICITY will have value of 1 when TRUE, else 0
+
+
+The rest of the variables will be dummified using the dummies package
+```{r}
+datasets %<>%
+  map(function(df) {
+    # create dummy data frame
+    df <- df %>%
+      as.data.frame() %>%
+      dummy.data.frame(names = c("EDUCATION", "JOB", "CAR_TYPE"))
     
     # return df
     return(df)
   })
 ```
 
-  * Converting all of the character fields to factors and then to numeric will be necessary for missForest
-    + To do so, we will duplicate all the the chracter columns and then use bind_cols to add them back to the dataset
-  * We will create duplicate columns of the character fields that will hold the numeric values
+  * Converting all of the character fields to to binary columns will make missForest's job easier as well as provide a better regression model
+  * The remaining variables are EDUCATION, JOB, CAR_TYPE
+
+The fields with spaces will be renamed to include _  
+```{r}
+replace_space <- function(x) str_replace(x, " ", "_")
+
+datasets %<>%
+  map(function(df) {
+    # rename all with spaces
+    df %<>%
+      rename_all(replace_space)
+    
+    # return df
+    return(df)
+  })
+```
+
 
 
 ### Missing Value Imputation
@@ -352,11 +399,211 @@ imputed <- forests %>%
 ## Build Models
 ![](../pics/3.png)
 
+### Leaps Subsetting
+We can use the leaps package to subset the explanatory variables to find the best model. All of the character variables have already been converted to factors and subsequently numerical values and all of the missing values have been imputed using missForest
+
+```{r}
+mlrs <- regsubsets(TARGET_AMT ~ . -TARGET_FLAG, data = imputed$train, method = "exhaustive", nvmax = NULL, nbest = 1)
+mlrs.summary <- summary(mlrs)
+print(mlrs.summary)
+```
+
+We can determine the best fits by ploting the number of variables in our subsets and using the cp value in combinationation with the adjusted R^2 value
+```{r}
+# determine best subset
+plot(mlrs.summary$cp, xlab = "Number of Variables", ylab = "Cp")
+points(which.min(mlrs.summary$cp), mlrs.summary$cp[which.min(mlrs.summary$cp)], pch = 20, col = "red")
+
+# cp plot
+# par(mfrow=c(1,2))
+plot(mlrs, scale = "Cp", main = "Cp")
+
+# r^2 splot
+plot(mlrs, scale = "adjr2", main = "Adjusted R^2")
+```
+
+  * Based on the diagnostic plot, 20 variables appear to fit the data best
+  
 
 
+### Multiple Linear Regression
+
+#### Model 1: All Variables
+We will first create a linear model with all of the predictors. It will most likely overfit the data but provides a good reference point. We also know from leaps, that the best model will use 16 of the predictors
+
+```{r}
+m1 <- lm(TARGET_AMT ~ . -TARGET_FLAG, data = imputed$train)
+summary(m1)
+```
+
+  * There are 16 significant variables in Model 1, 6 of which are highly significant at a 5% significance level
+  * The adjusted R^2 is .06737
+  * The 3 variables CAR_TYPEVan, JOBStudent, and EDUCATIONPhD are NA
+  * Interesting Positive Predictors
+    + SINGLEPARENT has a positive impact on TARGET_AMT. One would expect single parents to be more responsible because they are the only care providers for their children
+    + Home makers have the highest positive impact on TARGET_AMT
+    + COMMERCIALUSE vehicles have a higher positive impact
+    + Urban areas as expected are more prone to crashes due to population
+  * Interesting Negative Predictors
+    + Bachelor degrees have a higher negative impact on TARGET_AMT. This may be due to a lack of people pursuing education past a Bachelors
+    + Doctors have one of the highest negative impacts on TARGET_AMT. They see victims of car crashes
+    + RED_CAR has a negative impact. It is thought that red cars make people speed more
+    
+    
+#### Model 2: 20 Variables Chosen by leaps
+```{r}
+m2 <- lm(TARGET_AMT ~ KIDSDRIV + INCOME + SINGLEPARENT + MARRIED + MALE + EDUCATIONBachelors + JOBDoctor + JOBManager + TRAVTIME + COMMERCIALUSE + BLUEBOOK + TIF + CAR_TYPEMinivan + CAR_TYPESports_Car + CAR_TYPESUV + CLM_FREQ + REVOKED + MVR_PTS + CAR_AGE + URBANICITY, data = imputed$train)
+summary(m2)
+```
+
+  * The adjusted R^2 of Model 2 is .06792, still very small but slightly improved over Model 1
+  * Of the 20 variables, 16 are significant, while 10 are highly significant at the 5% level
+  * Interesting Positive Predictors
+    + COMMERCIALUSE is the highest positive influencer
+    + SINGLEPARENT is still a high positive influencer
+  * Interesting Negative Predictors
+    + JOBManager has overtaken JOBDoctor as the highest negative influencer
+    
+#### Model 3: 1 + Log Transform 20 Variables from Leaps
+```{r}
+m3 <- imputed$train %>%
+  mutate_all(~ log(1 + .x)) %>%
+  lm(TARGET_AMT ~ KIDSDRIV + INCOME + SINGLEPARENT + MARRIED + MALE + EDUCATIONBachelors + JOBDoctor + JOBManager + TRAVTIME + COMMERCIALUSE + BLUEBOOK + TIF + CAR_TYPEMinivan + CAR_TYPESports_Car + CAR_TYPESUV + CLM_FREQ + REVOKED + MVR_PTS + CAR_AGE + URBANICITY, data = .)
+
+summary(m3)
+```
+
+  * R^2 has greatly improved to .2159
+  * Interesting positive predictors
+    + URBANICITY is now the highest positive influencer
+    + COMMERCIALUSE still has a strong positive impact on TARGET_AMT
+  * Interesting negative predictors
+    + JOBManager is still the highest negative influencer
+    
+### Binary Logistic Regression
+
+#### Model 4: All Variables
+```{r}
+m4 <- glm(TARGET_FLAG ~ . -TARGET_AMT, data = imputed$train, family = "binomial")
+summary(m4)
+pR2(m4)
+```
+
+  * Using the pscl package, we can get a pseudo-R^2 value of ~.2304
+  * There are 19 significant variables in Model 4, 16 of which are highly significant at a 5% significance level
+  * The 3 variables CAR_TYPEVan, JOBStudent, and EDUCATIONPhD are NA
+  * Interesting Positive Predictors
+    + SINGLEPARENT has a positive impact on TARGET_AMT. One would expect single parents to be more responsible because they are the only care providers for their children
+    + REVOKED has the highest positive impact on TARGET_FLAG
+    + Urban areas as expected are more prone to crashes probably due to population
+    + High school has a positive impact, as opposed to the negative impact on TARGET_AMT
+  * Interesting Negative Predictors
+    + Bachelor degrees have a higher negative impact on TARGET_AMT. This may be due to a lack of people pursuing education past a Bachelors
+    + Managers have one of the highest negative impacts on TARGET_AMT. They see victims of car crashes
+    + RED_CAR has a negative impact. It is thought that red cars make people speed more
+    
+#### Model 5: 20 Variables Chosen by leaps (Untransformed)
+```{r}
+m5 <- glm(TARGET_FLAG ~ KIDSDRIV + INCOME + SINGLEPARENT + MARRIED + MALE + EDUCATIONBachelors + JOBDoctor + JOBManager + TRAVTIME + COMMERCIALUSE + BLUEBOOK + TIF + CAR_TYPEMinivan + CAR_TYPESports_Car + CAR_TYPESUV + CLM_FREQ + REVOKED + MVR_PTS + CAR_AGE + URBANICITY, data = imputed$train, family = "binomial")
+summary(m5)
+pR2(m5)
+```
+
+  * Using the pscl package, we can get a pseudo-R^2 value of ~.2216
+  * Interesting Positive Predictors
+    + COMMERCIALUSE now has the highest predictor
+  * Interesting Negative Predictors
+    + Managers are still the lowest negative predictor. Could be due to age
+    + Minivans have the lowest impact on crashes amongst the car types
+  * MALE is not a significant predictor but it has a highest impact
+  
+#### Model 6: 1 + Log Transform 20 Variables Chosen by leaps
+```{r}
+d <- imputed$train %>%
+  mutate_all(~ log(1 + .x))
+
+m6 <- glm(TARGET_FLAG ~ KIDSDRIV + INCOME + SINGLEPARENT + MARRIED + MALE + EDUCATIONBachelors + JOBDoctor + JOBManager + TRAVTIME + COMMERCIALUSE + BLUEBOOK + TIF + CAR_TYPEMinivan + CAR_TYPESports_Car + CAR_TYPESUV + CLM_FREQ + REVOKED + MVR_PTS + CAR_AGE + URBANICITY, data = d, family = "binomial")
+summary(m6)
+pR2(m6)
+```
+
+  * Using the pscl package, we can get a pseudo-R^2 value of ~.1987
+  * Interesting Positive Predictors
+    + URBANICITY now has the highest predictor
+    + SUV has a positie predictor
+  * Interesting Negative Predictors
+    + Managers are still the lowest negative predictor. Could be due to age
+    + Minivans have the lowest impact on crashes amongst the car types
+  * MALE is not a significant predictor but it has a highest impact
 
 ## Select Models
 ![](../pics/4.png)
+
+We will use Model 3 and Model 5 based on their R^2 values and the fact that all or most of the variables are significant at the 5% level
+
+### Model 3
+```{r}
+par(mfrow=c(2,2))
+
+plot(m3)
+hist(m3$residuals)
+qqnorm(m3$residuals)
+qqline(m3$residuals)
+```
+
+  * The histogram of the residuals do not show a normal distribution
+  * The qqplot shows a fairly linear relationship with the tails of the plot venturing away from the line
+  * The residual plot does not display contant variance
+  
+#### Test Model
+```{r}
+m3_results <- predict(m3, newdata = datasets$test2)
+datasets$test <- bind_cols(datasets$test2, data_frame(m3results = m3_results)) %>%
+  mutate(m3results = if_else(m3results < 0, 0, m3results),
+         m3amt_match = TARGET_AMT == m3results)
+datasets$test
+```
+
+### Model 5
+```{r}
+par(mfrow=c(2,2))
+
+plot(m5)
+hist(m5$residuals)
+qqnorm(m5$residuals)
+qqline(m5$residuals)
+```
+
+  * The histogram of the residuals do not show a normal distribution
+  * The qqplot shows a fairly linear relationship that ventures wildly away from linear towards the upper tail
+  * The residual plot shows no evidence of a constant variance
+  
+#### Test Model
+```{r}
+m5_results <- predict(m5, newdata = datasets$test2, type = "response")
+datasets$test <- bind_cols(datasets$test2, data_frame(m5results = m5_results)) %>%
+  mutate(m5results = if_else(m5_results > mean(TARGET_FLAG), 1, 0),
+         m5flag_match = m5results == TARGET_FLAG)
+datasets$test
+```
+
+#### Performance
+```{r}
+cm <- confusionMatrix(as.factor(datasets$test$m5results), as.factor(datasets$test$TARGET_FLAG), positive = "1", mode = "everything") %>%
+  print
+
+curveRoc <- roc(datasets$test$m5results, datasets$test$TARGET_FLAG)
+plot(curveRoc, legacy.axes = T, main = "pROC")
+```
+
+  * The accuracy is only ~73%
+  * Positive prediction was very poor at below 50%
+  * Negative prediction was decent sitting at ~89%
+  * Sensitivity is ~75%
+  * Specificity is ~72%
+  * The F1 is ~60%
+  * The AUC is `r curveRoc$auc`
+  * Over all, I'd say the model is pretty underwhelming in prediction power
 
 ## Code Appendix
 ```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE}
