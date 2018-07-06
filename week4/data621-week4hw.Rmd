@@ -349,10 +349,11 @@ imputed <- forests %>%
 ```
 
 
-
-
 ## Build Models
 ![](../pics/3.png)
+
+
+
 
 ## Select Models
 ![](../pics/4.png)
