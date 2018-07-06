@@ -335,8 +335,20 @@ forests <- datasets %>%
       select_if(is.numeric) %>%
       select(-INDEX) %>%
       missForest()
+    
+    # return df
+    return(df)
   })
 ```
+
+```{r}
+imputed <- forests %>%
+  map(function(x) {
+    return(x$ximp)
+  })
+```
+
+
 
 
 ## Build Models
