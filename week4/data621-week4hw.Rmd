@@ -238,7 +238,11 @@ vis %>%
 ![](../pics/2.png)
 
 ### Transforming Monetary Columns to Numeric
+
 ```{r}
+datasets <- list(train = insTraining, test = insTest)
+
+# helper function for converting text to number
 convertText2Num <- function(x) {
   x %>%
     # remove symbols and punctuation
@@ -246,9 +250,20 @@ convertText2Num <- function(x) {
     # convert to number
     as.numeric()
 }
+```
 
-insTrain <- insTraining %>%
-  mutate_at(c("INCOME", "HOME_VAL", "BLUEBOOK", "OLDCLAIM"), convertText2Num)
+
+
+```{r}
+datasets %<>%
+  map(function(df) {
+    df %<>%
+      # convert text to num
+      mutate_at(c("INCOME", "HOME_VAL", "BLUEBOOK", "OLDCLAIM"), convertText2Num)
+    
+    # return dataframe
+    return(df)
+  })
 ```
 
 Converting the currency columns to numeric will be important when modelling
@@ -257,7 +272,7 @@ Converting the currency columns to numeric will be important when modelling
 
 There was evidence of inconsistent naming across observations. We will transform those variables here. We will first create a list of all the character columns and the values they contain
 ```{r}
-charCols <- insTrain %>%
+charCols <- datasets$train %>%
   select_if(is.character) %>%
   lapply(function(x) unique(x)) %>%
   print
@@ -269,23 +284,58 @@ charCols <- insTrain %>%
   * URBANICITY will be trimmed to remove extra spaces and renamed to URBANCITY
 
 ```{r}
-insTrain %<>%
-  mutate(EDUCATION = str_replace_all(EDUCATION, "<", ""),
+datasets %<>%
+  map(function(df) {
+    df %<>%
+     mutate(EDUCATION = str_replace_all(EDUCATION, "<", ""),
          RED_CAR = str_to_title(RED_CAR),
          URBANICITY = str_replace(URBANICITY, "/ ", "/")) %>%
-  mutate_at(names(charCols), str_replace_all, pattern = "z_", replacement = "") %>%
-  rename(URBANCITY = URBANICITY)
+      mutate_at(names(charCols), str_replace_all, pattern = "z_", replacement = "")
+    
+    # return df
+    return(df)
+  })
 ```
+
+#### Transform All Character Fields to Factors
+```{r}
+datasets %<>%
+  map(function(df) {
+    # get chracter columns
+    z <- df %>%
+      select_if(is.character) %>%
+      mutate_all(as.factor) %>%
+      mutate_all(as.numeric)
+    
+    # rename columns
+    names(z) <- names(z) %>%
+      map(~ str_c(.x, "_f", collapse = ""))
+    
+    # bind cols
+    df %<>%
+      bind_cols(z)
+    
+    # return df
+    return(df)
+  })
+```
+
+  * Converting all of the character fields to factors and then to numeric will be necessary for missForest
+    + To do so, we will duplicate all the the chracter columns and then use bind_cols to add them back to the dataset
+  * We will create duplicate columns of the character fields that will hold the numeric values
+
 
 ### Missing Value Imputation
 We can use the package missForest to impute values for the NAs
 ```{r}
-training.forest <- insTrain %>%
-  mutate_if(is.character, as.factor) %>%
-  as.data.frame() %>%
-  missForest()
-
-training.imp <- training.forest$ximp
+forests <- datasets %>%
+  map(function(df) {
+    df %<>%
+      as.data.frame() %>%
+      select_if(is.numeric) %>%
+      select(-INDEX) %>%
+      missForest()
+  })
 ```
 
 
