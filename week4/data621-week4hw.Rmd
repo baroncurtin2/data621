@@ -585,7 +585,11 @@ datasets$test <- bind_cols(datasets$test2, data_frame(m5results = m5_results)) %
   mutate(m5results = if_else(m5_results > mean(TARGET_FLAG), 1, 0),
          m5flag_match = m5results == TARGET_FLAG)
 datasets$test
+
+mean(datasets$test$m5flag_match, na.rm = T)
 ```
+
+  * The linear model correctly predicted at a 72% rate
 
 #### Performance
 ```{r}
