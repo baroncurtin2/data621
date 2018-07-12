@@ -289,7 +289,7 @@ The glmulti package provides a convinient way to generate the best models. To ge
 
 ```{r}
 prm <- glmulti(TARGET ~ ., data = imputed$train,
-               levle = 1,
+               level = 1,
                method = "h",
                confsetsize = 5,
                plotty = F,
@@ -303,7 +303,30 @@ prm <- glmulti(TARGET ~ ., data = imputed$train,
 prm@formulas
 ```
 
+#### Model 1: 13 Variables
+```{r}
+m1 <- glm(TARGET ~ 1 + VolatileAcidity + CitricAcid + Chlorides + FreeSulfurDioxide + 
+    TotalSulfurDioxide + Density + pH + Sulphates + Alcohol + 
+    LabelAppeal + AcidIndex + STARS, data = imputed$train, family = "poisson")
+summary(m1)
+```
 
+  * The AIC for this model is 48651
+  * The model includes 11 significant variables at the 5% level
+  * AcidIndex has the highest negative impact on TARGET
+  * STARS has the highest positive impact on TARGET
+    + This aligns with conventional wisdom as one would expect previous reviews to influence future buyers
+    
+#### Model 2: All Variables
+```{r}
+m2 <- glm(TARGET ~ 1 + ., data = imputed$train, family = "poisson")
+summary(m2)
+```
+
+  * The AIC value ias 48654, slightly higher than model 1
+  * It reintroduces some insignificant variables that may overfit the data
+  * The highest positive impactful variable is STARS, aligning with conventional wisdom
+  * The highest negative variable is AcidIndex
 
 ### Negative Binomial Regression
 The glmulti package provides a convinient way to generate the best models. To generate the models, we will use that package
@@ -323,7 +346,33 @@ nbr <- glmulti(TARGET ~ ., data = imputed$train,
 nbr@formulas
 ```
 
+#### Model 3: 9 Variables
+```{r}
+m3 <- glm.nb(TARGET ~ 1 + VolatileAcidity + Chlorides + FreeSulfurDioxide + 
+    TotalSulfurDioxide + pH + Sulphates + LabelAppeal + AcidIndex + 
+    STARS, data = imputed$train)
+summary(m3)
+```
 
+  * This model has an AIC of 48661, higher than the poisson models
+  * All of the variables are significant
+  * The highest positive coefficient is STARS, aligning again with conventional wisdom
+  * The lowest negative coefficient is AcidIndex, similar to the poisson regressions
+  
+#### Model 4: Log Transform 9 Variables
+```{r}
+m4 <- imputed$train %>%
+  mutate_all(~ log(1 + .x)) %>%
+  glm.nb(TARGET ~ 1 + VolatileAcidity + Chlorides + FreeSulfurDioxide + 
+    TotalSulfurDioxide + pH + Sulphates + LabelAppeal + AcidIndex + 
+    STARS, data = .)
+summary(m4)
+```
+
+  * The log transformation resulted in a much lower AIC at 30191
+  * Many of the variables that were highly significant previously, became less significant
+  * The highest positive coefficient is STARS, aligning with conventional wisdom
+  * The lowest negative coefficient is AcidIndex
 
 ### Multiple Linear Regression
 For multiple linear regression, we can use the leaps package to return the best subset
